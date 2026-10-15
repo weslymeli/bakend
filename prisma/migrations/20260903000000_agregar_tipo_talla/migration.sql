@@ -1,0 +1,1 @@
+ALTER TABLE "tallas" ADD COLUMN "tipo" VARCHAR(20) NOT NULL DEFAULT 'ropa';

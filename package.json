@@ -1,0 +1,36 @@
+{
+  "name": "proyecto-oni-style",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "bcryptjs": "^3.0.3",
+    "cloudinary": "^2.10.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.2",
+    "groq-sdk": "^1.5.0",
+    "jsonwebtoken": "^9.0.3",
+    "mercadopago": "^2.12.0",
+    "multer": "^2.3.0",
+    "pg": "^8.20.0",
+    "prisma": "^7.8.0",
+    "resend": "^6.20.0",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  }
+}
