@@ -50,7 +50,9 @@ function parseTallas(tallas) {
 // ── LISTAR TODOS LOS PRODUCTOS (para el admin, incluye inactivos) ──
 const listarTodos = async (req, res) => {
   try {
+    const verInactivos = req.query.inactivos === "true";
     const productos = await prisma.producto.findMany({
+      where: verInactivos ? {} : { activo: true },
       include: {
         categoria: true,
         subcategoria: true,
@@ -71,8 +73,25 @@ const listarTodos = async (req, res) => {
 const crearProductoCompleto = async (req, res) => {
   try {
     const { nombre, slug, descripcion, precio, precioAntes, badge, destacado, categoriaId, subcategoriaId, tallas } = req.body;
+
+    if (!nombre?.trim()) return res.status(400).json({ error: 'El nombre es obligatorio.' });
+    if (!slug?.trim())   return res.status(400).json({ error: 'El slug es obligatorio.' });
+
     const tallasParsed = parseTallas(tallas);
-    const producto = await prisma.producto.create({ data: { nombre, slug, descripcion: descripcion || null, precio: parsePrice(precio), precioAntes: precioAntes ? parsePrice(precioAntes, 'precioAntes') : null, badge: badge || null, destacado: destacado === 'true' || destacado === true, categoriaId: parseInt(categoriaId), subcategoriaId: subcategoriaId ? parseInt(subcategoriaId) : null } });
+    const producto = await prisma.producto.create({
+      data: {
+        nombre: nombre.trim(),
+        slug: slug.trim(),
+        descripcion: descripcion || null,
+        precio: parsePrice(precio),
+        precioAntes: precioAntes ? parsePrice(precioAntes, 'precioAntes') : null,
+        badge: badge || null,
+        destacado: destacado === 'true' || destacado === true,
+        activo: true, // los productos nuevos nacen activos
+        categoriaId: parseInt(categoriaId),
+        subcategoriaId: subcategoriaId ? parseInt(subcategoriaId) : null,
+      },
+    });
     for (const t of tallasParsed) {
       const tallaCreada = await prisma.talla.create({ data: { nombre: t.nombre, tipo: t.tipo, productoId: producto.id } });
       await prisma.inventario.create({ data: { productoId: producto.id, tallaId: tallaCreada.id, cantidad: t.cantidad } });
@@ -84,6 +103,12 @@ const crearProductoCompleto = async (req, res) => {
     res.status(201).json({ mensaje: 'Producto creado con exito.', productoId: producto.id });
   } catch (error) {
     console.error(error);
+    // P2002: ya existe un producto con ese slug (puede estar inactivo)
+    if (error.code === 'P2002') {
+      return res.status(409).json({
+        error: 'Ya existe un producto con ese slug. Cambia el nombre o el slug (puede haber uno inactivo con el mismo nombre).',
+      });
+    }
     res.status(400).json({ error: error.message || 'Error al crear el producto.' });
   }
 };
@@ -123,7 +148,19 @@ const editarProductoCompleto = async (req, res) => {
     const precioCop = parsePrice(precio);
     const precioAntesCop = precioAntes ? parsePrice(precioAntes, "precioAntes") : null;
     await prisma.$transaction(async tx => {
-      await tx.producto.update({ where: { id }, data: { nombre: nombre.trim(), descripcion: descripcion || null, precio: precioCop, precioAntes: precioAntesCop, badge: badge || null, destacado: destacado === 'true' || destacado === true, activo: activo === 'true' || activo === true } });
+      await tx.producto.update({
+        where: { id },
+        data: {
+          nombre: nombre.trim(),
+          descripcion: descripcion || null,
+          precio: precioCop,
+          precioAntes: precioAntesCop,
+          badge: badge || null,
+          destacado: destacado === 'true' || destacado === true,
+          // solo cambia "activo" si el formulario lo envia
+          ...(activo !== undefined && { activo: activo === 'true' || activo === true }),
+        },
+      });
       const existentes = await tx.talla.findMany({ where: { productoId: id }, select: { id: true } });
       const idsEnviados = new Set(tallasParsed.filter(t => t.id).map(t => t.id));
       for (const talla of tallasParsed) {
@@ -213,11 +250,35 @@ const eliminarImagen = async (req, res) => {
 
 // ── ELIMINAR PRODUCTO ──
 const eliminarProducto = async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "ID invalido." });
+
   try {
-    const { id } = req.params;
-    await prisma.producto.update({ where: { id: parseInt(id) }, data: { activo: false } });
-    res.json({ mensaje: "Producto desactivado." });
+    // Intento de borrado real (todo o nada)
+    await prisma.$transaction([
+      prisma.inventario.deleteMany({ where: { productoId: id } }),
+      prisma.imagenProducto.deleteMany({ where: { productoId: id } }),
+      prisma.talla.deleteMany({ where: { productoId: id } }),
+      prisma.producto.delete({ where: { id } }),
+    ]);
+    return res.json({ mensaje: "Producto eliminado definitivamente.", tipo: "eliminado" });
   } catch (error) {
+    // P2003 / P2014: hay pedidos, reseñas u otros datos que dependen del producto
+    if (error.code === "P2003" || error.code === "P2014") {
+      try {
+        await prisma.producto.update({ where: { id }, data: { activo: false } });
+        return res.json({
+          mensaje: "El producto tiene historial (pedidos o reseñas), asi que se desactivo en lugar de borrarse.",
+          tipo: "desactivado",
+        });
+      } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: "Error al desactivar el producto." });
+      }
+    }
+    if (error.code === "P2025") {
+      return res.status(404).json({ error: "Producto no encontrado." });
+    }
     console.error(error);
     res.status(500).json({ error: "Error al eliminar el producto." });
   }
